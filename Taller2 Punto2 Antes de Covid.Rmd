@@ -1,0 +1,170 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tseries)
+library(forecast)
+library(plotly)
+library(dplyr)
+library(readxl)
+library(TSstudio)
+
+```
+
+# Problema con datos de la economía colombiana
+
+```{r}
+setwd("C:/Users/sofia/Documents/2023-1/ST/Taller 2")
+data <- read_excel("Data Assignment #2.xlsx", sheet=1)
+t_desempleo <- ts(data$TD_NAL, start=c(2001, 1), end=c(2023, 3), frequency=12)
+```
+
+## Ajuste con datos antes de 2020
+
+```{r}
+t_desempleo_pre_covid <- window(t_desempleo, start = c(2001, 1), end = c(2020, 2)) 
+```
+
+```{r}
+
+t_desempleo_split_pre_covid <- ts_split(t_desempleo_pre_covid, sample.out = 12)
+train_precovid <- t_desempleo_split_pre_covid$train
+test_precovid  <- t_desempleo_split_pre_covid$test
+```
+
+```{r}
+par(mfrow=c(1,2))
+acf(train_precovid, lag.max = 60)
+pacf(train_precovid, lag.max = 60)
+```
+
+El decaimiento lineal de los rezagos estacionales indica que la serie no es estacionaria y que se requiere diferenciación estacional. Comenzaremos con una diferenciación estacional de la serie y la gráfica para identificar si la serie es estacionaria:
+
+Primera diferencia estacional (12)
+
+```{r}
+t_desempleos_precovid_d12 <- diff(train_precovid, 12)
+```
+
+```{r}
+par(mfrow=c(1,1))
+plot(t_desempleos_precovid_d12 , type="l", xlab="Fecha", ylab="%(first-difference)", main="Tasa de desempleo en Colombia -  Primera diferencia Estacional")
+```
+
+```{r}
+adf.test(t_desempleos_precovid_d12 )
+```
+
+```{r}
+pp.test(t_desempleos_precovid_d12 )
+```
+
+```{r}
+kpss.test(t_desempleos_precovid_d12 )
+```
+
+```{r}
+p <- q <- P <- Q <- 0:2
+p
+ 
+```
+
+```{r}
+
+arima_grid <- expand.grid(p,q,P,Q)
+names(arima_grid) <- c("p", "q", "P", "Q")
+arima_grid$d <- 0
+arima_grid$D <- 1
+arima_grid
+```
+
+```{r}
+
+arima_grid$k <- rowSums(arima_grid)
+arima_grid 
+
+```
+
+```{r}
+cases <- which(arima_grid$k <= 4)
+length(cases)
+```
+
+```{r}
+library(dplyr)
+arima_grid_filter <- arima_grid %>% filter(k <= 4)
+arima_grid_filter
+```
+
+```{r}
+arima_search_precovid_d0 <- lapply(1:nrow(arima_grid_filter), function(i){
+  md <- NULL
+  md <- arima(train_precovid, order = c(arima_grid_filter$p[i], 0, arima_grid_filter$q[i]),
+              seasonal = list(order = c(arima_grid_filter$P[i], 1, arima_grid_filter$Q[i])))
+  results <- data.frame(p = arima_grid_filter$p[i], d = 0, q = arima_grid_filter$q[i],
+                        P = arima_grid_filter$P[i], D = 1, Q = arima_grid_filter$Q[i],
+                        AIC = md$aic)
+  
+#ARRANGE -> ORDENAR SEGÚN AIC
+}) %>% bind_rows() %>% arrange(AIC)
+
+arima_search_precovid_d0
+```
+
+```{r}
+arima_search_precovid_d1 <- lapply(1:nrow(arima_grid_filter), function(i){
+  md <- NULL
+  md <- arima(train_precovid, order = c(arima_grid_filter$p[i], 1, arima_grid_filter$q[i]),
+              seasonal = list(order = c(arima_grid_filter$P[i], 1, arima_grid_filter$Q[i])))
+  results <- data.frame(p = arima_grid_filter$p[i], d = 1, q = arima_grid_filter$q[i],
+                        P = arima_grid_filter$P[i], D = 1, Q = arima_grid_filter$Q[i],
+                        AIC = md$aic)
+  
+#ARRANGE -> ORDENAR SEGÚN AIC
+}) %>% bind_rows() %>% arrange(AIC)
+
+arima_search_precovid_d1
+```
+
+El mejor modelo es SARIMA(2,0,0)x(0,1,1)
+
+```{r}
+t_desempleos_precovid_best_md <- arima(train_precovid, order = c(0,1,1), seasonal = list(order = c(0,1,1)))
+t_desempleos_precovid_best_md
+```
+
+```{r}
+t_desempleo_precovid_test_fc <- forecast(t_desempleos_precovid_best_md, h = 12)
+t_desempleo_precovid_test_fc
+```
+
+```{r}
+accuracy(t_desempleo_precovid_test_fc, test_precovid)
+```
+
+```{r}
+test_forecast(t_desempleo_pre_covid, forecast.obj = t_desempleo_precovid_test_fc, test = test_precovid)
+```
+
+```{r}
+final_md_precovid <- arima(t_desempleo_pre_covid, order = c(0,1,1), seasonal = list(order = c(0,1,1)))
+final_md
+```
+
+```{r}
+checkresiduals(final_md_precovid)
+```
+
+```{r}
+t_desempleo_precovid_fc <- forecast(final_md_precovid, h = 12)
+t_desempleo_precovid_fc # print forecasted values
+
+```
+
+```{r}
+par(mfrow=c(1,1))
+plot(t_desempleo_precovid_fc, main = "Tasa de desempleo - Forecast",  col.main = "darkgreen")
+
+```
